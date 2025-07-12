@@ -1,7 +1,3 @@
-Absolutely — here's a complete and concise `README.md` tailored for your real-time chat application built with Socket.IO, Express, React, and MongoDB. It highlights your project architecture, setup steps, features, and placeholder spots for visuals.
-
----
-
 ## 📖 Real-Time Chat Application with Socket.IO
 
 A full-stack, real-time chat application built using **React**, **Express**, **Socket.IO**, and **MongoDB**, designed to support authenticated messaging, private conversations, typing indicators, and real-time notifications across users.
