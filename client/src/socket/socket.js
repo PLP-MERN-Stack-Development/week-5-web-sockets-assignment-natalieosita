@@ -1,149 +1,134 @@
-// socket.js - Socket.io client setup
-
 import { io } from 'socket.io-client';
 import { useEffect, useState } from 'react';
+import { useAuth } from '../context/AuthContext';
 
-// Socket.io connection URL
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
 
-// Create socket instance
-export const socket = io(SOCKET_URL, {
+// Connect to /chat namespace
+export const socket = io(`${SOCKET_URL}/chat`, {
   autoConnect: false,
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
 });
 
-// Custom hook for using socket.io
 export const useSocket = () => {
+  const { token, username } = useAuth();
+
   const [isConnected, setIsConnected] = useState(socket.connected);
-  const [lastMessage, setLastMessage] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [lastMessage, setLastMessage] = useState(null);
   const [users, setUsers] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
+  const [readReceipts, setReadReceipts] = useState(new Set());
 
-  // Connect to socket server
-  const connect = (username) => {
-    socket.connect();
-    if (username) {
-      socket.emit('user_join', username);
+  const connect = () => {
+    if (token) {
+      socket.auth = { token };
+      socket.connect();
+
+      socket.once('connect_error', (err) => {
+        console.error('Socket connection error:', err.message);
+      });
     }
   };
 
-  // Disconnect from socket server
   const disconnect = () => {
     socket.disconnect();
   };
 
-  // Send a message
-  const sendMessage = (message) => {
-    socket.emit('send_message', { message });
+  const sendMessage = (text, to = null) => {
+    socket.emit('chat:message', { text, to });
   };
 
-  // Send a private message
-  const sendPrivateMessage = (to, message) => {
-    socket.emit('private_message', { to, message });
-  };
-
-  // Set typing status
   const setTyping = (isTyping) => {
-    socket.emit('typing', isTyping);
+    socket.emit('chat:typing', isTyping);
   };
 
-  // Socket event listeners
+  const markAsRead = (msgId) => {
+    socket.emit('chat:read', msgId);
+  };
+
+  // Handle all socket events
   useEffect(() => {
-    // Connection events
-    const onConnect = () => {
-      setIsConnected(true);
+    const onConnect = () => setIsConnected(true);
+    const onDisconnect = () => setIsConnected(false);
+
+    const onMessage = (msg) => {
+      setLastMessage(msg);
+      setMessages((prev) => [...prev, msg]);
+      if (msg._id) markAsRead(msg._id);
     };
 
-    const onDisconnect = () => {
-      setIsConnected(false);
+    const onHistory = (chatHistory) => {
+      setMessages(chatHistory);
     };
 
-    // Message events
-    const onReceiveMessage = (message) => {
-      setLastMessage(message);
-      setMessages((prev) => [...prev, message]);
+    const onReadReceipt = (msgId) => {
+      setReadReceipts((prev) => new Set(prev).add(msgId));
     };
 
-    const onPrivateMessage = (message) => {
-      setLastMessage(message);
-      setMessages((prev) => [...prev, message]);
+    const onTyping = ({ user }) => {
+      setTypingUsers((prev) => {
+        const set = new Set(prev);
+        if (user) set.add(user);
+        else set.delete(user);
+        return [...set];
+      });
     };
 
-    // User events
-    const onUserList = (userList) => {
+    const onUserUpdate = (userList) => {
       setUsers(userList);
     };
 
-    const onUserJoined = (user) => {
-      // You could add a system message here
+    const onSystemEvent = (text) => {
       setMessages((prev) => [
         ...prev,
         {
-          id: Date.now(),
+          _id: `sys-${Date.now()}`,
           system: true,
-          message: `${user.username} joined the chat`,
+          text,
           timestamp: new Date().toISOString(),
         },
       ]);
     };
 
-    const onUserLeft = (user) => {
-      // You could add a system message here
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now(),
-          system: true,
-          message: `${user.username} left the chat`,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    };
-
-    // Typing events
-    const onTypingUsers = (users) => {
-      setTypingUsers(users);
-    };
-
-    // Register event listeners
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
-    socket.on('receive_message', onReceiveMessage);
-    socket.on('private_message', onPrivateMessage);
-    socket.on('user_list', onUserList);
-    socket.on('user_joined', onUserJoined);
-    socket.on('user_left', onUserLeft);
-    socket.on('typing_users', onTypingUsers);
+    socket.on('chat:history', onHistory);
+    socket.on('chat:message', onMessage);
+    socket.on('chat:read', onReadReceipt);
+    socket.on('chat:typing', onTyping);
+    socket.on('chat:joined', ({ user }) => onSystemEvent(`${user} joined`));
+    socket.on('chat:left', ({ user }) => onSystemEvent(`${user} left`));
+    socket.on('chat:users', onUserUpdate);
 
-    // Clean up event listeners
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
-      socket.off('receive_message', onReceiveMessage);
-      socket.off('private_message', onPrivateMessage);
-      socket.off('user_list', onUserList);
-      socket.off('user_joined', onUserJoined);
-      socket.off('user_left', onUserLeft);
-      socket.off('typing_users', onTypingUsers);
+      socket.off('chat:history', onHistory);
+      socket.off('chat:message', onMessage);
+      socket.off('chat:read', onReadReceipt);
+      socket.off('chat:typing', onTyping);
+      socket.off('chat:joined');
+      socket.off('chat:left');
+      socket.off('chat:users', onUserUpdate);
     };
-  }, []);
+  }, [token]);
 
   return {
     socket,
     isConnected,
-    lastMessage,
     messages,
+    lastMessage,
     users,
     typingUsers,
+    readReceipts,
     connect,
     disconnect,
     sendMessage,
-    sendPrivateMessage,
     setTyping,
   };
 };
 
-export default socket; 
+export default socket;
